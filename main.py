@@ -26,7 +26,7 @@ from traceback_logger import TracebackLogger, Status
 # Configuration
 # ----------------------------------------------------------------------
 OUTPUT_FILENAME = "extracted_content.txt"
-FETCH_TIMEOUT = 30  # seconds per request
+FETCH_TIMEOUT = 10  # seconds per request
 ADD_PROMPT = True   # enable/disable prompt selection
 
 # Predefined prompts (same as in original)
@@ -451,24 +451,24 @@ class ConsoleApp:
         total_count = len(fetch_results)
         fail_count = total_count - success_count
         
-        # Print each result
+        # Print each result (just ✓ or ✗ and URL, no extra text)
         for res in fetch_results:
             if res['success']:
-                print(f"  {self.GREEN}✓{self.RESET} {res['url']} -> {self.GREEN}success{self.RESET}")
+                print(f"  {self.GREEN}✓{self.RESET} {res['url']}")
             else:
-                print(f"  {self.RED}✗{self.RESET} {res['url']} -> {self.RED}failed: {res['error']}{self.RESET}")
+                print(f"  {self.RED}✗{self.RESET} {res['url']}")
         
-        # Print summary
-        print(f"\n{self.BOLD}Summary:{self.RESET}")
-        print(f"  {self.GREEN}Success: {success_count}{self.RESET}")
-        print(f"  {self.RED}Failed: {fail_count}{self.RESET}")
-        print(f"  {self.YELLOW}Total: {total_count}{self.RESET}")
+        # Print summary (plain text, no colors)
+        print(f"\nSummary:")
+        print(f"  Success: {success_count}")
+        print(f"  Failed: {fail_count}")
+        print(f"  Total: {total_count}")
         
         if fail_count > 0:
-            print(f"\n{self.YELLOW}Note: Failed URLs were skipped. Check logs for details.{self.RESET}")
+            print(f"\nNote: Failed URLs were skipped. Check logs for details.")
 
     async def _run_async(self):
-        print(f"\n{self.BOLD}{self.BLUE}=== URL Text Extractor ==={self.RESET}\n")
+        print(f"\n=== URL Text Extractor ===\n")
         
         urls = self._get_urls_from_user()
         if not urls:
@@ -492,9 +492,9 @@ class ConsoleApp:
             print(f"\n{self.RED}No content could be extracted. Exiting.{self.RESET}")
             return
 
-        # Prompt handling (if enabled)
+        # Prompt handling (if enabled) - plain text, no color
         if self.prompt_handler and ADD_PROMPT:
-            print(f"\n{self.YELLOW}Would you like to add a prompt to the text output?{self.RESET}")
+            print("\nWould you like to add a prompt to the text output?")
             self.prompt_handler.display_and_select()
 
         # Generate final output
