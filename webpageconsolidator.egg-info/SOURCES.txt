@@ -1,0 +1,8 @@
+LICENSE
+README.md
+pyproject.toml
+webpageconsolidator.egg-info/PKG-INFO
+webpageconsolidator.egg-info/SOURCES.txt
+webpageconsolidator.egg-info/dependency_links.txt
+webpageconsolidator.egg-info/requires.txt
+webpageconsolidator.egg-info/top_level.txt
