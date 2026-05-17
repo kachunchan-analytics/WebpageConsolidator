@@ -413,23 +413,21 @@ class ConsoleApp:
         self.output_gen = OutputGenerator(self.prompt_handler) if self.prompt_handler else None
 
     def _get_urls_from_user(self) -> List[str]:
-        """Read URLs from stdin, one per line, empty line to finish. LBYL: validate each."""
-        print("Enter URLs (one per line, empty line to finish):")
+        print("Enter URLs (one per line). Press Ctrl+D (Unix) or Ctrl+Z+Enter (Windows) when done:")
+        try:
+            lines = sys.stdin.read().splitlines()
+        except (KeyboardInterrupt, EOFError):
+            return []
         urls = []
-        while True:
-            try:
-                line = sys.stdin.readline().strip()
-                if not line:
-                    break
-                # LBYL: basic URL validation (http/https)
-                if line.startswith(('http://', 'https://')):
-                    urls.append(line)
-                else:
-                    print(f"Invalid URL (must start with http:// or https://): {line}")
-                    self.logger.log(Status.WARNING, message=f"User skipped invalid URL: {line}")
-            except KeyboardInterrupt:
-                print("\nInput cancelled.")
-                break
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(('http://', 'https://')):
+                urls.append(line)
+            else:
+                print(f"Invalid URL (must start with http:// or https://): {line}")
+                self.logger.log(Status.WARNING, message=f"User skipped invalid URL: {line}")
         return urls
 
     async def _run_async(self):
