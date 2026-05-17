@@ -402,6 +402,14 @@ class OutputGenerator:
 # ConsoleApp (orchestrator)
 # ----------------------------------------------------------------------
 class ConsoleApp:
+    # ANSI color codes as class attributes
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+
     def __init__(self):
         self.logger = TracebackLogger()
         self.fetcher = AsyncUrlFetcher(self.logger)
@@ -413,11 +421,12 @@ class ConsoleApp:
         self.output_gen = OutputGenerator(self.prompt_handler) if self.prompt_handler else None
 
     def _get_urls_from_user(self) -> List[str]:
-        print("Enter URLs (one per line). Press Ctrl+D (Unix) or Ctrl+Z+Enter (Windows) when done:")
+        print(f"{self.YELLOW}Enter URLs (one per line). Press Ctrl+D (Unix) or Ctrl+Z+Enter (Windows) when done:{self.RESET}")
         try:
             lines = sys.stdin.read().splitlines()
         except (KeyboardInterrupt, EOFError):
             return []
+        
         urls = []
         for line in lines:
             line = line.strip()
@@ -426,18 +435,47 @@ class ConsoleApp:
             if line.startswith(('http://', 'https://')):
                 urls.append(line)
             else:
-                print(f"Invalid URL (must start with http:// or https://): {line}")
+                print(f"{self.RED}Invalid URL (must start with http:// or https://): {line}{self.RESET}")
                 self.logger.log(Status.WARNING, message=f"User skipped invalid URL: {line}")
+        
+        if urls:
+            print(f"{self.YELLOW}--[Start scraping]--{self.RESET}")
         return urls
 
+    def _print_scraping_report(self, fetch_results: List[dict], extracted_items: List[Tuple[str, str]]) -> None:
+        """Print a colored report showing which URLs succeeded and which failed."""
+        print(f"\n{self.BOLD}{self.BLUE}=== Scraping Report ==={self.RESET}")
+        
+        # Count successes and failures
+        success_count = len(extracted_items)
+        total_count = len(fetch_results)
+        fail_count = total_count - success_count
+        
+        # Print each result
+        for res in fetch_results:
+            if res['success']:
+                print(f"  {self.GREEN}✓{self.RESET} {res['url']} -> {self.GREEN}success{self.RESET}")
+            else:
+                print(f"  {self.RED}✗{self.RESET} {res['url']} -> {self.RED}failed: {res['error']}{self.RESET}")
+        
+        # Print summary
+        print(f"\n{self.BOLD}Summary:{self.RESET}")
+        print(f"  {self.GREEN}Success: {success_count}{self.RESET}")
+        print(f"  {self.RED}Failed: {fail_count}{self.RESET}")
+        print(f"  {self.YELLOW}Total: {total_count}{self.RESET}")
+        
+        if fail_count > 0:
+            print(f"\n{self.YELLOW}Note: Failed URLs were skipped. Check logs for details.{self.RESET}")
+
     async def _run_async(self):
-        print("\n=== URL Text Extractor ===\n")
+        print(f"\n{self.BOLD}{self.BLUE}=== URL Text Extractor ==={self.RESET}\n")
+        
         urls = self._get_urls_from_user()
         if not urls:
-            print("No valid URLs provided. Exiting.")
+            print(f"{self.RED}No valid URLs provided. Exiting.{self.RESET}")
             return
 
-        print(f"\nFetching {len(urls)} URL(s)...")
+        print(f"\n{self.YELLOW}Fetching {len(urls)} URL(s)...{self.RESET}")
         fetch_results = await self.fetcher.fetch_all(urls)
 
         # Process successes
@@ -446,17 +484,17 @@ class ConsoleApp:
             if res['success']:
                 text = self.extractor.extract_text(res['content'], res['url'], res['content_type'])
                 extracted_items.append((res['url'], text))
-                print(f"  ✓ {res['url']} -> extracted {len(text)} chars")
-            else:
-                print(f"  ✗ {res['url']} -> failed: {res['error']}")
+
+        # Print scraping report
+        self._print_scraping_report(fetch_results, extracted_items)
 
         if not extracted_items:
-            print("\nNo content could be extracted. Exiting.")
+            print(f"\n{self.RED}No content could be extracted. Exiting.{self.RESET}")
             return
 
         # Prompt handling (if enabled)
         if self.prompt_handler and ADD_PROMPT:
-            print("\nWould you like to add a prompt to the text output?")
+            print(f"\n{self.YELLOW}Would you like to add a prompt to the text output?{self.RESET}")
             self.prompt_handler.display_and_select()
 
         # Generate final output
@@ -466,24 +504,28 @@ class ConsoleApp:
         output_dir = os.path.dirname(OUTPUT_FILENAME) or "."
         if not os.access(output_dir, os.W_OK):
             self.logger.log(Status.ERROR, message=f"Output directory not writable: {output_dir}")
-            print(f"Error: Cannot write to {output_dir}")
+            print(f"{self.RED}Error: Cannot write to {output_dir}{self.RESET}")
             return
 
         try:
             with open(OUTPUT_FILENAME, 'w', encoding='utf-8') as f:
                 f.write(final_text)
-            print(f"\n✅ Saved to {OUTPUT_FILENAME}")
+            print(f"\n{self.GREEN}✅ Saved to {OUTPUT_FILENAME}{self.RESET}")
+            
+            # Show file size
+            file_size = os.path.getsize(OUTPUT_FILENAME)
+            print(f"{self.BLUE}File size: {file_size} bytes{self.RESET}")
         except Exception as e:
             self.logger.log(Status.ERROR, exc=e, message=f"Failed to write {OUTPUT_FILENAME}")
-            print(f"Error: Could not save file - {e}")
+            print(f"{self.RED}Error: Could not save file - {e}{self.RESET}")
 
     def run(self):
         try:
             asyncio.run(self._run_async())
         except KeyboardInterrupt:
-            print("\n\033[93mProgram interrupted by user.\033[0m")
+            print(f"\n{self.YELLOW}Program interrupted by user.{self.RESET}")
         except Exception as e:
-            print(f"\033[91mUnexpected error: {e}\033[0m")
+            print(f"{self.RED}Unexpected error: {e}{self.RESET}")
             self.logger.log(Status.ERROR, exc=e, message="Unhandled exception in main")
             raise
 
