@@ -6,8 +6,6 @@ web_fetcher.py - Async HTTP fetchers with anti-scraping fallbacks.
 import asyncio
 import itertools
 import random
-import subprocess
-import sys
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
@@ -29,11 +27,6 @@ try:
 except ImportError:
     CURL_CFFI_AVAILABLE = False
 
-try:
-    from playwright.async_api import async_playwright
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
 
 from traceback_logger import TracebackLogger, Status
 
@@ -297,97 +290,6 @@ class RotatingProxyFetcher(BaseFetcher):
             last_error = result.error
         return FetchResult.failure(url, f"All proxies failed: {last_error}")
 
-# ----------------------------------------------------------------------
-# PlaywrightFetcher
-# ----------------------------------------------------------------------
-class PlaywrightFetcher(BaseFetcher):
-    def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT, headless: bool = True):
-        super().__init__(logger, timeout)
-        self.headless = headless
-        self._browser = None
-        self._playwright = None
-        self._lock = asyncio.Lock()
-        self._available = PLAYWRIGHT_AVAILABLE
-        if not self._available:
-            self.logger.log(Status.ERROR, message="Playwright not installed. Run: pip install playwright")
-
-    @staticmethod
-    async def ensure_installed(logger: TracebackLogger) -> bool:
-        try:
-            import playwright  # noqa: F401
-            # Browsers are installed lazily on first use, but we can force it here
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], 
-                        capture_output=True, check=False)
-            # Optionally install deps (may fail on some systems)
-            subprocess.run([sys.executable, "-m", "playwright", "install-deps"], 
-                        capture_output=True, check=False)
-            return True
-        except ImportError:
-            logger.log(Status.ERROR, message="Playwright not installed. Run: pip install playwright")
-            return False
-        except Exception as e:
-            logger.log(Status.ERROR, exc=e, message="Failed to install Playwright")
-            return False
-
-    async def _get_browser(self):
-        if self._browser is not None:
-            return self._browser
-        async with self._lock:
-            if self._browser is not None:
-                return self._browser
-            if not self._available:
-                self._available = await self.ensure_installed(self.logger)
-            if not self._available:
-                raise RuntimeError("Playwright not available")
-            try:
-                self._playwright = await async_playwright().start()
-                self._browser = await self._playwright.chromium.launch(
-                    headless=self.headless,
-                    args=['--disable-blink-features=AutomationControlled']
-                )
-                return self._browser
-            except Exception as e:
-                self.logger.log(Status.ERROR, exc=e, message="Failed to launch Playwright browser")
-                raise
-
-    async def fetch(self, url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None) -> FetchResult:
-        if not self._validate_url(url):
-            return FetchResult.failure(url, "Invalid URL")
-        try:
-            browser = await self._get_browser()
-            context_options = {}
-            if proxy:
-                context_options['proxy'] = {"server": proxy}
-            context = await browser.new_context(**context_options)
-            if headers:
-                await context.set_extra_http_headers(headers)
-            page = await context.new_page()
-            try:
-                response = await page.goto(url, timeout=self.timeout * 1000, wait_until="networkidle")
-                if response and response.status != 200:
-                    error_msg = f"HTTP {response.status} for {url}"
-                    self.logger.log(Status.FETCH, message=error_msg)
-                    await context.close()
-                    return FetchResult.failure(url, error_msg)
-                content = await page.content()
-                content_bytes = content.encode('utf-8')
-                content_type = "text/html"
-                if response and response.headers.get('content-type'):
-                    content_type = response.headers['content-type'].lower()
-                await context.close()
-                return FetchResult.success(url, content_bytes, content_type)
-            finally:
-                await context.close()
-        except Exception as e:
-            error_msg = f"Playwright error for {url}: {str(e)}"
-            self.logger.log(Status.FETCH, exc=e, message=error_msg)
-            return FetchResult.failure(url, error_msg)
-
-    async def close(self):
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
 
 # ----------------------------------------------------------------------
 # AsyncUrlFetcher
@@ -408,11 +310,7 @@ class AsyncUrlFetcher:
                     self.fetchers.append(RotatingProxyFetcher(curl_fetcher, proxy_list))
                 self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
                 self.fetchers.append(HeaderRandomizerFetcher(RequestsThreadFetcher(logger, timeout)))
-            if PLAYWRIGHT_AVAILABLE:
-                pw_fetcher = PlaywrightFetcher(logger, timeout)
-                self.fetchers.append(pw_fetcher)
-                if proxy_list:
-                    self.fetchers.append(RotatingProxyFetcher(pw_fetcher, proxy_list))
+
             if not CURL_CFFI_AVAILABLE:
                 self.logger.log(Status.WARNING, message="curl_cffi not available, anti-scrape capabilities reduced")
                 self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
