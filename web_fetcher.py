@@ -68,7 +68,7 @@ class FetchResult:
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
         return cls(url=url, success=True, content=content, content_type=content_type, error=None)
-        
+
 # ----------------------------------------------------------------------
 # BaseFetcher
 # ----------------------------------------------------------------------
@@ -314,15 +314,13 @@ class PlaywrightFetcher(BaseFetcher):
     @staticmethod
     async def ensure_installed(logger: TracebackLogger) -> bool:
         try:
-            import playwright
-            result = subprocess.run(
-                [sys.executable, "-m", "playwright", "install", "--dry-run"],
-                capture_output=True, text=True
-            )
-            if "already installed" not in result.stdout.lower():
-                logger.log(Status.INFO, message="Installing Playwright browsers (chromium)...")
-                subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-                subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=True)
+            import playwright  # noqa: F401
+            # Browsers are installed lazily on first use, but we can force it here
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], 
+                        capture_output=True, check=False)
+            # Optionally install deps (may fail on some systems)
+            subprocess.run([sys.executable, "-m", "playwright", "install-deps"], 
+                        capture_output=True, check=False)
             return True
         except ImportError:
             logger.log(Status.ERROR, message="Playwright not installed. Run: pip install playwright")
