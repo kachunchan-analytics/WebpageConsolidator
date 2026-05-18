@@ -67,7 +67,6 @@ FETCH_TIMEOUT = 10
 # ----------------------------------------------------------------------
 @dataclass(frozen=True)
 class FetchResult:
-    """Result of a single URL fetch."""
     url: str
     success: bool
     content: bytes
@@ -76,14 +75,12 @@ class FetchResult:
 
     @classmethod
     def failure(cls, url: str, error: str) -> "FetchResult":
-        """Create a failed result."""
         return cls(url=url, success=False, content=b'', content_type='', error=error)
 
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
-        """Create a successful result."""
         return cls(url=url, success=True, content=content, content_type=content_type, error=None)
-
+        
 # ----------------------------------------------------------------------
 # BaseFetcher (abstract)
 # ----------------------------------------------------------------------
