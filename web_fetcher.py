@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 """
 web_fetcher.py - Async HTTP fetchers with anti-scraping fallbacks.
-
-Provides a modular set of fetchers that can be chained together. Supports:
-- aiohttp (basic async)
-- requests in thread (sync fallback)
-- curl_cffi (TLS impersonation)
-- header randomization wrapper
-- proxy rotation wrapper
-- playwright (full browser automation with auto-install)
 """
 
 import asyncio
@@ -20,13 +12,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
-# External libraries (to be installed)
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
 import requests
 from requests.exceptions import RequestException
 
-# Optional libraries (checked at runtime)
 try:
     from fake_useragent import UserAgent
     FAKE_USER_AGENT_AVAILABLE = True
@@ -46,7 +36,6 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
-# Import logger and Status from existing module
 from traceback_logger import TracebackLogger, Status
 
 # ----------------------------------------------------------------------
@@ -63,7 +52,7 @@ DEFAULT_HEADERS = {
 FETCH_TIMEOUT = 10
 
 # ----------------------------------------------------------------------
-# Data class for fetch results
+# Data class for fetch results (FIXED: no defaults before error)
 # ----------------------------------------------------------------------
 @dataclass(frozen=True)
 class FetchResult:
@@ -80,13 +69,11 @@ class FetchResult:
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
         return cls(url=url, success=True, content=content, content_type=content_type, error=None)
-        
+
 # ----------------------------------------------------------------------
-# BaseFetcher (abstract)
+# BaseFetcher
 # ----------------------------------------------------------------------
 class BaseFetcher:
-    """Abstract base class for all HTTP fetchers."""
-
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT):
         self.logger = logger
         self.timeout = timeout
@@ -106,15 +93,12 @@ class BaseFetcher:
         return True
 
     async def fetch(self, url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None) -> FetchResult:
-        """Fetch a URL and return a FetchResult."""
         raise NotImplementedError
 
 # ----------------------------------------------------------------------
-# AiohttpFetcher (primary async)
+# AiohttpFetcher
 # ----------------------------------------------------------------------
 class AiohttpFetcher(BaseFetcher):
-    """Async fetcher using aiohttp with fake browser headers."""
-
     async def fetch(self, url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None) -> FetchResult:
         if not self._validate_url(url):
             return FetchResult.failure(url, "Invalid URL")
@@ -148,11 +132,9 @@ class AiohttpFetcher(BaseFetcher):
             return FetchResult.failure(url, error_msg)
 
 # ----------------------------------------------------------------------
-# RequestsThreadFetcher (synchronous fallback in thread pool)
+# RequestsThreadFetcher
 # ----------------------------------------------------------------------
 class RequestsThreadFetcher(BaseFetcher):
-    """Fallback fetcher using requests (synchronous) running in a thread pool."""
-
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT):
         super().__init__(logger, timeout)
         self._executor = ThreadPoolExecutor(max_workers=5)
@@ -198,11 +180,9 @@ class RequestsThreadFetcher(BaseFetcher):
             return FetchResult.failure(url, error_msg)
 
 # ----------------------------------------------------------------------
-# CurlCffiFetcher (TLS impersonation)
+# CurlCffiFetcher
 # ----------------------------------------------------------------------
 class CurlCffiFetcher(BaseFetcher):
-    """Async fetcher using curl_cffi with browser TLS impersonation."""
-
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT, impersonate: str = "chrome120"):
         super().__init__(logger, timeout)
         self.impersonate = impersonate
@@ -243,11 +223,9 @@ class CurlCffiFetcher(BaseFetcher):
             return FetchResult.failure(url, error_msg)
 
 # ----------------------------------------------------------------------
-# HeaderRandomizerFetcher (wrapper)
+# HeaderRandomizerFetcher
 # ----------------------------------------------------------------------
 class HeaderRandomizerFetcher(BaseFetcher):
-    """Wraps a base fetcher and randomizes request headers to avoid fingerprinting."""
-
     def __init__(self, base_fetcher: BaseFetcher):
         super().__init__(base_fetcher.logger, base_fetcher.timeout)
         self.base = base_fetcher
@@ -291,11 +269,9 @@ class HeaderRandomizerFetcher(BaseFetcher):
         return await self.base.fetch(url, headers=random_h, proxy=proxy)
 
 # ----------------------------------------------------------------------
-# RotatingProxyFetcher (wrapper)
+# RotatingProxyFetcher
 # ----------------------------------------------------------------------
 class RotatingProxyFetcher(BaseFetcher):
-    """Wraps a base fetcher and rotates through a list of proxies."""
-
     def __init__(self, base_fetcher: BaseFetcher, proxy_list: List[str], max_retries: int = 3):
         super().__init__(base_fetcher.logger, base_fetcher.timeout)
         self.base = base_fetcher
@@ -315,21 +291,17 @@ class RotatingProxyFetcher(BaseFetcher):
             result = await self.base.fetch(url, headers=headers, proxy=proxy_url)
             if result.success:
                 return result
-            # If failure is anti-scrape related (403, 429), try next proxy
             error_lower = (result.error or '').lower()
             if '403' in error_lower or '429' in error_lower:
                 last_error = result.error
                 continue
-            # For other errors (timeout, DNS), also try next proxy
             last_error = result.error
         return FetchResult.failure(url, f"All proxies failed: {last_error}")
 
 # ----------------------------------------------------------------------
-# PlaywrightFetcher (full browser automation with auto-install)
+# PlaywrightFetcher
 # ----------------------------------------------------------------------
 class PlaywrightFetcher(BaseFetcher):
-    """Async fetcher using Playwright (Chromium). Auto-installs browser if missing."""
-
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT, headless: bool = True):
         super().__init__(logger, timeout)
         self.headless = headless
@@ -342,10 +314,8 @@ class PlaywrightFetcher(BaseFetcher):
 
     @staticmethod
     async def ensure_installed(logger: TracebackLogger) -> bool:
-        """Check and install playwright and its dependencies."""
         try:
             import playwright
-            # Check if browsers are installed (dry-run)
             result = subprocess.run(
                 [sys.executable, "-m", "playwright", "install", "--dry-run"],
                 capture_output=True, text=True
@@ -363,7 +333,6 @@ class PlaywrightFetcher(BaseFetcher):
             return False
 
     async def _get_browser(self):
-        """Lazy init of browser with locking."""
         if self._browser is not None:
             return self._browser
         async with self._lock:
@@ -389,7 +358,6 @@ class PlaywrightFetcher(BaseFetcher):
             return FetchResult.failure(url, "Invalid URL")
         try:
             browser = await self._get_browser()
-            # Create context with optional proxy and headers
             context_options = {}
             if proxy:
                 context_options['proxy'] = {"server": proxy}
@@ -419,49 +387,40 @@ class PlaywrightFetcher(BaseFetcher):
             return FetchResult.failure(url, error_msg)
 
     async def close(self):
-        """Cleanup browser and playwright."""
         if self._browser:
             await self._browser.close()
         if self._playwright:
             await self._playwright.stop()
 
 # ----------------------------------------------------------------------
-# AsyncUrlFetcher (composite with fallback chain)
+# AsyncUrlFetcher
 # ----------------------------------------------------------------------
 class AsyncUrlFetcher:
-    """Manages multiple fetchers and falls back if primary fails."""
-
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT,
                  anti_scrape: bool = False, proxy_list: Optional[List[str]] = None):
         self.logger = logger
         self.fetchers: List[BaseFetcher] = []
-        # Always have basic fetchers
         self.fetchers.append(AiohttpFetcher(logger, timeout))
         self.fetchers.append(RequestsThreadFetcher(logger, timeout))
 
         if anti_scrape:
-            # Add curl_cffi if available
             if CURL_CFFI_AVAILABLE:
                 curl_fetcher = CurlCffiFetcher(logger, timeout)
                 self.fetchers.append(curl_fetcher)
                 if proxy_list:
                     self.fetchers.append(RotatingProxyFetcher(curl_fetcher, proxy_list))
-                # Also add header-randomized version of basic fetchers
                 self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
                 self.fetchers.append(HeaderRandomizerFetcher(RequestsThreadFetcher(logger, timeout)))
-            # Add playwright
             if PLAYWRIGHT_AVAILABLE:
                 pw_fetcher = PlaywrightFetcher(logger, timeout)
                 self.fetchers.append(pw_fetcher)
                 if proxy_list:
                     self.fetchers.append(RotatingProxyFetcher(pw_fetcher, proxy_list))
-            # If curl_cffi not available, at least add header randomizer
             if not CURL_CFFI_AVAILABLE:
                 self.logger.log(Status.WARNING, message="curl_cffi not available, anti-scrape capabilities reduced")
                 self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
 
     async def _fetch_one_with_fallback(self, url: str) -> FetchResult:
-        """Try each fetcher in order until one succeeds; return last failure if all fail."""
         last_result = None
         for fetcher in self.fetchers:
             result = await fetcher.fetch(url)
@@ -473,7 +432,6 @@ class AsyncUrlFetcher:
         return last_result or FetchResult.failure(url, "All fetchers failed")
 
     async def fetch_all(self, urls: List[str]) -> List[FetchResult]:
-        """Fetch all URLs concurrently, preserving order."""
         tasks = [self._fetch_one_with_fallback(url) for url in urls]
         results = await asyncio.gather(*tasks)
         return results
