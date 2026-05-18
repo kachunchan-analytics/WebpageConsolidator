@@ -54,9 +54,6 @@ FETCH_TIMEOUT = 10
 # Data class for fetch results (FIXED: no defaults before error)
 # ----------------------------------------------------------------------
 class FetchResult:
-    """Plain class to hold fetch results (avoids dataclass field ordering issues)."""
-    __slots__ = ('url', 'success', 'content', 'content_type', 'error')
-    
     def __init__(self, url: str, success: bool, content: bytes, content_type: str, error: Optional[str] = None):
         self.url = url
         self.success = success
@@ -71,7 +68,7 @@ class FetchResult:
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
         return cls(url=url, success=True, content=content, content_type=content_type, error=None)
-
+        
 # ----------------------------------------------------------------------
 # BaseFetcher
 # ----------------------------------------------------------------------
