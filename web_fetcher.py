@@ -8,7 +8,6 @@ import itertools
 import random
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
@@ -54,13 +53,16 @@ FETCH_TIMEOUT = 10
 # ----------------------------------------------------------------------
 # Data class for fetch results (FIXED: no defaults before error)
 # ----------------------------------------------------------------------
-@dataclass(frozen=True)
 class FetchResult:
-    url: str
-    success: bool
-    content: bytes
-    content_type: str
-    error: Optional[str] = None
+    """Plain class to hold fetch results (avoids dataclass field ordering issues)."""
+    __slots__ = ('url', 'success', 'content', 'content_type', 'error')
+    
+    def __init__(self, url: str, success: bool, content: bytes, content_type: str, error: Optional[str] = None):
+        self.url = url
+        self.success = success
+        self.content = content
+        self.content_type = content_type
+        self.error = error
 
     @classmethod
     def failure(cls, url: str, error: str) -> "FetchResult":
