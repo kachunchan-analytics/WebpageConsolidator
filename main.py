@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 
 # Import logger and Status from external module (provided by user)
 from traceback_logger import TracebackLogger, Status
+from cli_selector import CliSelector
 
 # ----------------------------------------------------------------------
 # Configuration
@@ -272,17 +273,21 @@ class ContentExtractor:
 # ----------------------------------------------------------------------
 # PromptHandler (text only, no PDF)
 # ----------------------------------------------------------------------
+from typing import List, Optional
+from cli_selector import CliSelector   # assuming CliSelector is in cli_selector.py
+
 class PromptHandler:
     MODE_RAW = 0
     MODE_FENCE_ONLY = 1
     MODE_PREDEFINED = 2
     MODE_CUSTOM = 3
 
-    def __init__(self, prompt_list: List[str], logger: TracebackLogger):
-        self.prompt_list = prompt_list
-        self.logger = logger
+    def __init__(self, prompt_list: Optional[List[str]] = None):
+        """Initialize with an optional list of predefined prompts."""
+        self.prompt_list = prompt_list if prompt_list is not None else []
         self.mode = self.MODE_RAW
         self.selected_prompt = None
+        self.selector = CliSelector()   # reusable selector instance
 
     def _handle_raw_mode(self) -> bool:
         self.mode = self.MODE_RAW
@@ -299,27 +304,21 @@ class PromptHandler:
             print("No predefined prompts available. Falling back to fence only.")
             return self._handle_fence_only()
 
-        YELLOW = "\033[93m"
-        RESET = "\033[0m"
-        print("\nAvailable prompts:")
-        for idx, prompt in enumerate(self.prompt_list, start=1):
-            print(f"  {YELLOW}{idx}. {prompt}{RESET}")
+        # Build choices as indices (1..N) and display text as prompt strings
+        choices = [str(i) for i in range(1, len(self.prompt_list) + 1)]
+        display_dict = {str(i): prompt for i, prompt in enumerate(self.prompt_list, start=1)}
 
-        while True:
-            try:
-                choice = input("Select prompt number: ").strip()
-                p_num = int(choice)
-                if 1 <= p_num <= len(self.prompt_list):
-                    self.mode = self.MODE_PREDEFINED
-                    self.selected_prompt = self.prompt_list[p_num - 1]
-                    return True
-                else:
-                    print(f"Enter a number between 1 and {len(self.prompt_list)}.")
-            except ValueError:
-                print("Invalid input. Enter a number.")
-            except KeyboardInterrupt:
-                print("\nPrompt selection cancelled. Using fence only.")
-                return self._handle_fence_only()
+        self.selector.set(
+            prompt="Select a predefined prompt (enter number):",
+            choices=choices,
+            display_dict=display_dict
+        )
+        selected_key = self.selector.ask()   # returns string like "1"
+        idx = int(selected_key) - 1
+
+        self.mode = self.MODE_PREDEFINED
+        self.selected_prompt = self.prompt_list[idx]
+        return True
 
     def _handle_custom_prompt(self) -> bool:
         print("\nEnter your custom prompt (cannot be empty):")
@@ -337,35 +336,34 @@ class PromptHandler:
                 return self._handle_fence_only()
 
     def display_and_select(self) -> bool:
-        YELLOW = "\033[93m"
-        RESET = "\033[0m"
-        print("\nText output formatting options:")
-        print(f"  {YELLOW}{self.MODE_RAW}. No fence, no prompt (raw text){RESET}")
-        print(f"  {YELLOW}{self.MODE_FENCE_ONLY}. Add backticks fence only{RESET}")
-        print(f"  {YELLOW}{self.MODE_PREDEFINED}. Add backticks fence + select a predefined prompt{RESET}")
-        print(f"  {YELLOW}{self.MODE_CUSTOM}. Add backticks fence + write custom prompt{RESET}")
+        """Show formatting options using CliSelector and return whether to add fence."""
+        # Use CliSelector for the main mode selection
+        self.selector.set(
+            prompt="Text output formatting options:",
+            choices=["0", "1", "2", "3"],
+            display_dict={
+                "0": "No fence, no prompt (raw text)",
+                "1": "Add backticks fence only",
+                "2": "Add backticks fence + select a predefined prompt",
+                "3": "Add backticks fence + write custom prompt"
+            }
+        )
 
         while True:
-            try:
-                choice = input("Select option (0, 1, 2, 3): ").strip()
-                mode = int(choice)
-                if mode == self.MODE_RAW:
-                    return self._handle_raw_mode()
-                elif mode == self.MODE_FENCE_ONLY:
-                    return self._handle_fence_only()
-                elif mode == self.MODE_PREDEFINED:
-                    return self._handle_predefined_prompt()
-                elif mode == self.MODE_CUSTOM:
-                    return self._handle_custom_prompt()
-                else:
-                    print("Please enter 0, 1, 2, or 3.")
-            except ValueError:
-                print("Invalid input. Enter a number.")
-            except KeyboardInterrupt:
-                print("\nSelection cancelled. Using raw output.")
+            choice = self.selector.ask()   # returns "0", "1", "2", or "3"
+            mode = int(choice)
+            if mode == self.MODE_RAW:
                 return self._handle_raw_mode()
+            elif mode == self.MODE_FENCE_ONLY:
+                return self._handle_fence_only()
+            elif mode == self.MODE_PREDEFINED:
+                return self._handle_predefined_prompt()
+            elif mode == self.MODE_CUSTOM:
+                return self._handle_custom_prompt()
+            # ask() already validates input, so we shouldn't reach here
 
     def format_output(self, raw_text: str) -> str:
+        """Apply the selected formatting to the raw text."""
         if self.mode == self.MODE_RAW:
             return raw_text
         elif self.mode == self.MODE_FENCE_ONLY:
@@ -376,6 +374,7 @@ class PromptHandler:
             return raw_text
 
     def reset(self):
+        """Reset to raw mode with no selected prompt."""
         self.mode = self.MODE_RAW
         self.selected_prompt = None
 
