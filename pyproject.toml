@@ -10,6 +10,9 @@ dependencies = [
     "trafilatura>=1.6.0",
     "beautifulsoup4>=4.12.0",
     "lxml>=4.9.0",
+    "curl_cffi>=0.5.0",
+    "fake-useragent>=1.4.0",
+    "playwright>=1.40.0",
 ]
 
 [project.optional-dependencies]
@@ -18,11 +21,6 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
-]
-anti-scrape = [
-    "curl_cffi>=0.5.0",
-    "fake-useragent>=1.4.0",
-    "playwright>=1.40.0",
 ]
 
 [build-system]
