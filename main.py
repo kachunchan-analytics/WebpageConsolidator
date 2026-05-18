@@ -414,7 +414,7 @@ class ConsoleApp:
         self.fetcher = AsyncUrlFetcher(self.logger)
         self.extractor = ContentExtractor(self.logger)
         if ADD_PROMPT:
-            self.prompt_handler = PromptHandler(PROMPT_LIST, self.logger)
+            self.prompt_handler = PromptHandler(PROMPT_LIST)
         else:
             self.prompt_handler = None
         self.output_gen = OutputGenerator(self.prompt_handler) if self.prompt_handler else None
