@@ -8,7 +8,6 @@ import itertools
 import random
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
-import cgi
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
