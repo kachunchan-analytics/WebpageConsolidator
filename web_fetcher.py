@@ -8,6 +8,7 @@ import itertools
 import random
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
+import cgi
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
@@ -47,21 +48,49 @@ FETCH_TIMEOUT = 10
 # Data class for fetch results (FIXED: no defaults before error)
 # ----------------------------------------------------------------------
 class FetchResult:
-    def __init__(self, url: str, success: bool, content: bytes, content_type: str, error: Optional[str] = None):
+    def __init__(self, url: str, success: bool, content: bytes, content_type: str, text: str = "", error: Optional[str] = None):
         self.url = url
         self.success = success
-        self.content = content
+        self.content = content          # raw bytes (preserved for binary data)
         self.content_type = content_type
+        self.text = text                # decoded string (correct for Chinese)
         self.error = error
 
     @classmethod
     def failure(cls, url: str, error: str) -> "FetchResult":
-        return cls(url=url, success=False, content=b'', content_type='', error=error)
+        return cls(url=url, success=False, content=b'', content_type='', text='', error=error)
 
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
-        return cls(url=url, success=True, content=content, content_type=content_type, error=None)
+        # Decode content using charset from Content-Type or auto-detection
+        text = cls._decode_content(content, content_type)
+        return cls(url=url, success=True, content=content, content_type=content_type, text=text, error=None)
 
+    @staticmethod
+    def _decode_content(content: bytes, content_type: str) -> str:
+        charset = None
+        if content_type:
+            import cgi
+            _, params = cgi.parse_header(content_type)
+            charset = params.get('charset')
+        
+        if charset:
+            try:
+                return content.decode(charset)
+            except (LookupError, UnicodeDecodeError):
+                pass
+        
+        # Fallback to UTF-8, then auto-detect if chardet is available
+        try:
+            return content.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                import chardet
+                detected = chardet.detect(content)
+                encoding = detected.get('encoding', 'utf-8')
+                return content.decode(encoding, errors='replace')
+            except ImportError:
+                return content.decode('utf-8', errors='replace')
 # ----------------------------------------------------------------------
 # BaseFetcher
 # ----------------------------------------------------------------------
