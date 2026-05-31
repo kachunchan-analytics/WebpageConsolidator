@@ -8,6 +8,7 @@ import itertools
 import random
 from typing import Dict, List, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from abc import ABC, abstractmethod
 
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
@@ -44,24 +45,8 @@ DEFAULT_HEADERS = {
 FETCH_TIMEOUT = 10
 
 # ----------------------------------------------------------------------
-# Data class for fetch results (FIXED: no defaults before error)
+# Data class for fetch results (improved charset detection)
 # ----------------------------------------------------------------------
-class FetchResult:
-    def __init__(self, url: str, success: bool, content: bytes, content_type: str, error: Optional[str] = None):
-        self.url = url
-        self.success = success
-        self.content = content
-        self.content_type = content_type
-        self.error = error
-
-    @classmethod
-    def failure(cls, url: str, error: str) -> "FetchResult":
-        return cls(url=url, success=False, content=b'', content_type='', error=error)
-
-    @classmethod
-    def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
-        return cls(url=url, success=True, content=content, content_type=content_type, error=None)
-        
 class FetchResult:
     def __init__(self, url: str, success: bool, content: bytes, content_type: str, text: str = "", error: Optional[str] = None):
         self.url = url
@@ -89,53 +74,71 @@ class FetchResult:
             'text/', 'application/json', 'application/xml', 'application/javascript',
             'application/x-www-form-urlencoded', 'application/rss+xml', 'application/atom+xml'
         )
-        is_text = any(ct_lower.startswith(t) for t in text_types)
-        if not is_text:
+        if not any(ct_lower.startswith(t) for t in text_types):
             return ""
 
-        # 1. Try to extract charset from Content-Type header
+        # 1. Robust charset extraction from Content-Type header
         charset = None
-        parts = content_type.split(';')
-        for part in parts[1:]:
-            if '=' in part:
-                key, val = part.split('=', 1)
-                if key.strip().lower() == 'charset':
-                    charset = val.strip().strip('"\'')
-                    break
+        try:
+            from email.message import Message
+            msg = Message()
+            msg['content-type'] = content_type
+            charset = msg.get_param('charset', None)
+        except Exception:
+            try:
+                import cgi
+                _, params = cgi.parse_header(content_type)
+                charset = params.get('charset')
+            except Exception:
+                pass
 
+        # 2. BOM handling (including UTF-8 BOM)
+        bom_encodings = [
+            (b'\xef\xbb\xbf', 'utf-8-sig'),   # UTF-8 with BOM
+            (b'\xff\xfe', 'utf-16-le'),       # UTF-16 LE
+            (b'\xfe\xff', 'utf-16-be'),       # UTF-16 BE
+            (b'\xff\xfe\x00\x00', 'utf-32-le'),
+            (b'\x00\x00\xfe\xff', 'utf-32-be'),
+        ]
+        for bom, enc in bom_encodings:
+            if content.startswith(bom):
+                try:
+                    return content.decode(enc)
+                except UnicodeDecodeError:
+                    break   # BOM present but decoding failed, continue to next methods
+
+        # 3. Try charset from Content-Type header
         if charset:
             try:
                 return content.decode(charset)
             except (LookupError, UnicodeDecodeError):
                 pass
 
-        # 2. Check for UTF-16 / UTF-32 Byte Order Mark (BOM)
-        if content.startswith(b'\xff\xfe') or content.startswith(b'\xfe\xff'):
-            try:
-                return content.decode('utf-16')
-            except UnicodeDecodeError:
-                pass
-        if content.startswith(b'\xff\xfe\x00\x00') or content.startswith(b'\x00\x00\xfe\xff'):
-            try:
-                return content.decode('utf-32')
-            except UnicodeDecodeError:
-                pass
-
-        # 3. Fallback to UTF-8, then auto-detect with chardet if available
+        # 4. Try UTF-8 (no BOM)
         try:
             return content.decode('utf-8')
         except UnicodeDecodeError:
+            # 5. Use charset_normalizer as primary detector
             try:
-                import chardet
-                detected = chardet.detect(content)
+                from charset_normalizer import detect
+                detected = detect(content)
                 encoding = detected.get('encoding', 'utf-8')
                 return content.decode(encoding, errors='replace')
             except ImportError:
-                return content.decode('utf-8', errors='replace')
+                # Fallback to chardet if available
+                try:
+                    import chardet
+                    detected = chardet.detect(content)
+                    encoding = detected.get('encoding', 'utf-8')
+                    return content.decode(encoding, errors='replace')
+                except ImportError:
+                    # Last resort: replace undecodable bytes
+                    return content.decode('utf-8', errors='replace')
+
 # ----------------------------------------------------------------------
 # BaseFetcher
 # ----------------------------------------------------------------------
-class BaseFetcher:
+class BaseFetcher(ABC):
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT):
         self.logger = logger
         self.timeout = timeout
@@ -154,8 +157,10 @@ class BaseFetcher:
             return False
         return True
 
+    @abstractmethod
     async def fetch(self, url: str, headers: Optional[Dict[str, str]] = None, proxy: Optional[str] = None) -> FetchResult:
-        raise NotImplementedError
+        """Fetch a URL asynchronously. Must be implemented by subclasses."""
+        pass
 
 # ----------------------------------------------------------------------
 # AiohttpFetcher
@@ -364,43 +369,6 @@ class RotatingProxyFetcher(BaseFetcher):
 # ----------------------------------------------------------------------
 # AsyncUrlFetcher
 # ----------------------------------------------------------------------
-class AsyncUrlFetcher:
-    def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT,
-                 anti_scrape: bool = False, proxy_list: Optional[List[str]] = None):
-        self.logger = logger
-        self.fetchers: List[BaseFetcher] = []
-        self.fetchers.append(AiohttpFetcher(logger, timeout))
-        self.fetchers.append(RequestsThreadFetcher(logger, timeout))
-
-        if anti_scrape:
-            if CURL_CFFI_AVAILABLE:
-                curl_fetcher = CurlCffiFetcher(logger, timeout)
-                self.fetchers.append(curl_fetcher)
-                if proxy_list:
-                    self.fetchers.append(RotatingProxyFetcher(curl_fetcher, proxy_list))
-                self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
-                self.fetchers.append(HeaderRandomizerFetcher(RequestsThreadFetcher(logger, timeout)))
-
-            if not CURL_CFFI_AVAILABLE:
-                self.logger.log(Status.WARNING, message="curl_cffi not available, anti-scrape capabilities reduced")
-                self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
-
-    async def _fetch_one_with_fallback(self, url: str) -> FetchResult:
-        last_result = None
-        for fetcher in self.fetchers:
-            result = await fetcher.fetch(url)
-            if result.success:
-                return result
-            last_result = result
-            self.logger.log(Status.WARNING, message=f"Fetcher {fetcher.__class__.__name__} failed for {url}: {result.error}")
-        self.logger.log(Status.ERROR, message=f"All fetchers failed for {url}")
-        return last_result or FetchResult.failure(url, "All fetchers failed")
-
-    async def fetch_all(self, urls: List[str]) -> List[FetchResult]:
-        tasks = [self._fetch_one_with_fallback(url) for url in urls]
-        results = await asyncio.gather(*tasks)
-        return results
-
 class AsyncUrlFetcher:
     def __init__(self, logger: TracebackLogger, timeout: int = FETCH_TIMEOUT,
                  anti_scrape: bool = False, proxy_list: Optional[List[str]] = None,
