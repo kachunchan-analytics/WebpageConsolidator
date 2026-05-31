@@ -77,29 +77,23 @@ class FetchResult:
 
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
-        # Only decode if content_type suggests it's text-based
         text = cls._decode_if_text(content, content_type)
         return cls(url=url, success=True, content=content, content_type=content_type, text=text, error=None)
 
     @staticmethod
     def _decode_if_text(content: bytes, content_type: str) -> str:
-        # Determine if content is likely text-based
         if not content_type:
-            # No content-type header – assume binary to be safe
             return ""
-        
         ct_lower = content_type.lower()
         text_types = (
             'text/', 'application/json', 'application/xml', 'application/javascript',
             'application/x-www-form-urlencoded', 'application/rss+xml', 'application/atom+xml'
         )
         is_text = any(ct_lower.startswith(t) for t in text_types)
-        
         if not is_text:
-            # Binary file (PDF, image, etc.) – no text decoding
             return ""
-        
-        # Extract charset from Content-Type
+
+        # 1. Try to extract charset from Content-Type header
         charset = None
         parts = content_type.split(';')
         for part in parts[1:]:
@@ -108,14 +102,26 @@ class FetchResult:
                 if key.strip().lower() == 'charset':
                     charset = val.strip().strip('"\'')
                     break
-        
+
         if charset:
             try:
                 return content.decode(charset)
             except (LookupError, UnicodeDecodeError):
                 pass
-        
-        # Fallback to UTF-8, then auto-detect if chardet is available
+
+        # 2. Check for UTF-16 / UTF-32 Byte Order Mark (BOM)
+        if content.startswith(b'\xff\xfe') or content.startswith(b'\xfe\xff'):
+            try:
+                return content.decode('utf-16')
+            except UnicodeDecodeError:
+                pass
+        if content.startswith(b'\xff\xfe\x00\x00') or content.startswith(b'\x00\x00\xfe\xff'):
+            try:
+                return content.decode('utf-32')
+            except UnicodeDecodeError:
+                pass
+
+        # 3. Fallback to UTF-8, then auto-detect with chardet if available
         try:
             return content.decode('utf-8')
         except UnicodeDecodeError:
