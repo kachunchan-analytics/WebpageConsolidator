@@ -394,26 +394,78 @@ class AsyncUrlFetcher:
                 self.fetchers.append(HeaderRandomizerFetcher(AiohttpFetcher(logger, timeout)))
 
     async def _fetch_one_with_fallback(self, url: str) -> FetchResult:
-        """Try all fetchers with an overall timeout."""
+        """Try all fetchers with an overall timeout using racing behavior."""
         try:
-            return await asyncio.wait_for(self._try_fetchers(url), timeout=self.overall_timeout)
+            return await asyncio.wait_for(self._race_fetchers(url), timeout=self.overall_timeout)
         except asyncio.TimeoutError:
             self.logger.log(Status.TIMEOUT, message=f"Overall timeout after {self.overall_timeout}s for {url}")
             return FetchResult.failure(url, f"Overall timeout after fallback chain")
 
-    async def _try_fetchers(self, url: str) -> FetchResult:
-        """Iterate fetchers sequentially without a global timeout."""
+    async def _race_fetchers(self, url: str) -> FetchResult:
+        """Run all fetchers concurrently and return the first successful result."""
+        if not self.fetchers:
+            return FetchResult.failure(url, "No fetchers available")
+        
+        # Create tasks for all fetchers
+        tasks = [asyncio.create_task(fetcher.fetch(url)) for fetcher in self.fetchers]
+        pending = set(tasks)
         last_result = None
-        for fetcher in self.fetchers:
-            result = await fetcher.fetch(url)
-            if result.success:
-                return result
-            last_result = result
-            self.logger.log(Status.WARNING, message=f"Fetcher {fetcher.__class__.__name__} failed for {url}: {result.error}")
-        self.logger.log(Status.ERROR, message=f"All fetchers failed for {url}")
-        return last_result or FetchResult.failure(url, "All fetchers failed")
+        
+        try:
+            while pending:
+                # Wait for the first task to complete (success or failure)
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                
+                for task in done:
+                    result = task.result()
+                    if result.success:
+                        # Cancel all still pending fetchers
+                        for p in pending:
+                            p.cancel()
+                        # Also cancel any that might be in the done set but not processed
+                        # (though this shouldn't happen with FIRST_COMPLETED)
+                        self.logger.log(Status.FETCH, message=f"Success from {self._get_fetcher_name(task)} for {url}")
+                        return result
+                    else:
+                        last_result = result
+                        self.logger.log(Status.WARNING, 
+                                      message=f"Fetcher {self._get_fetcher_name(task)} failed for {url}: {result.error}")
+                
+                # If we have pending tasks and no success yet, continue waiting
+                # (pending may have been updated by the wait call)
+            
+            # All fetchers failed
+            self.logger.log(Status.ERROR, message=f"All fetchers failed for {url}")
+            return last_result or FetchResult.failure(url, "All fetchers failed")
+            
+        except Exception as e:
+            # Cancel all tasks on unexpected error
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            error_msg = f"Unexpected error during racing: {str(e)}"
+            self.logger.log(Status.ERROR, exc=e, message=error_msg)
+            return FetchResult.failure(url, error_msg)
+        finally:
+            # Ensure all tasks are cleaned up
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+    
+    def _get_fetcher_name(self, task: asyncio.Task) -> str:
+        """Extract fetcher class name from a task (for logging)."""
+        try:
+            # This is a bit hacky - we could store names when creating tasks
+            # For now, we'll try to get the coroutine name or return generic
+            coro = task.get_coro()
+            if hasattr(coro, '__self__'):
+                return coro.__self__.__class__.__name__
+            return "Unknown"
+        except Exception:
+            return "Unknown"
 
     async def fetch_all(self, urls: List[str]) -> List[FetchResult]:
+        """Fetch multiple URLs concurrently."""
         tasks = [self._fetch_one_with_fallback(url) for url in urls]
         results = await asyncio.gather(*tasks)
         return results
