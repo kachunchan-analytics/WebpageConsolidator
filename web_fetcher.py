@@ -51,9 +51,9 @@ class FetchResult:
     def __init__(self, url: str, success: bool, content: bytes, content_type: str, text: str = "", error: Optional[str] = None):
         self.url = url
         self.success = success
-        self.content = content          # raw bytes (preserved for binary data)
+        self.content = content
         self.content_type = content_type
-        self.text = text                # decoded string (correct for Chinese)
+        self.text = text
         self.error = error
 
     @classmethod
@@ -62,17 +62,22 @@ class FetchResult:
 
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
-        # Decode content using charset from Content-Type or auto-detection
         text = cls._decode_content(content, content_type)
         return cls(url=url, success=True, content=content, content_type=content_type, text=text, error=None)
 
     @staticmethod
     def _decode_content(content: bytes, content_type: str) -> str:
+        # Extract charset from Content-Type header (e.g., 'text/html; charset=gbk')
         charset = None
         if content_type:
-            import cgi
-            _, params = cgi.parse_header(content_type)
-            charset = params.get('charset')
+            # Simple manual parsing (works without cgi)
+            parts = content_type.split(';')
+            for part in parts[1:]:
+                if '=' in part:
+                    key, val = part.split('=', 1)
+                    if key.strip().lower() == 'charset':
+                        charset = val.strip().strip('"\'')
+                        break
         
         if charset:
             try:
