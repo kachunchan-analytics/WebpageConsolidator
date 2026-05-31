@@ -50,9 +50,9 @@ class FetchResult:
     def __init__(self, url: str, success: bool, content: bytes, content_type: str, text: str = "", error: Optional[str] = None):
         self.url = url
         self.success = success
-        self.content = content
+        self.content = content          # raw bytes
         self.content_type = content_type
-        self.text = text
+        self.text = text                # decoded string (only for text-based content)
         self.error = error
 
     @classmethod
@@ -61,22 +61,37 @@ class FetchResult:
 
     @classmethod
     def success(cls, url: str, content: bytes, content_type: str) -> "FetchResult":
-        text = cls._decode_content(content, content_type)
+        # Only decode if content_type suggests it's text-based
+        text = cls._decode_if_text(content, content_type)
         return cls(url=url, success=True, content=content, content_type=content_type, text=text, error=None)
 
     @staticmethod
-    def _decode_content(content: bytes, content_type: str) -> str:
-        # Extract charset from Content-Type header (e.g., 'text/html; charset=gbk')
+    def _decode_if_text(content: bytes, content_type: str) -> str:
+        # Determine if content is likely text-based
+        if not content_type:
+            # No content-type header – assume binary to be safe
+            return ""
+        
+        ct_lower = content_type.lower()
+        text_types = (
+            'text/', 'application/json', 'application/xml', 'application/javascript',
+            'application/x-www-form-urlencoded', 'application/rss+xml', 'application/atom+xml'
+        )
+        is_text = any(ct_lower.startswith(t) for t in text_types)
+        
+        if not is_text:
+            # Binary file (PDF, image, etc.) – no text decoding
+            return ""
+        
+        # Extract charset from Content-Type
         charset = None
-        if content_type:
-            # Simple manual parsing (works without cgi)
-            parts = content_type.split(';')
-            for part in parts[1:]:
-                if '=' in part:
-                    key, val = part.split('=', 1)
-                    if key.strip().lower() == 'charset':
-                        charset = val.strip().strip('"\'')
-                        break
+        parts = content_type.split(';')
+        for part in parts[1:]:
+            if '=' in part:
+                key, val = part.split('=', 1)
+                if key.strip().lower() == 'charset':
+                    charset = val.strip().strip('"\'')
+                    break
         
         if charset:
             try:
@@ -95,6 +110,7 @@ class FetchResult:
                 return content.decode(encoding, errors='replace')
             except ImportError:
                 return content.decode('utf-8', errors='replace')
+
 # ----------------------------------------------------------------------
 # BaseFetcher
 # ----------------------------------------------------------------------
