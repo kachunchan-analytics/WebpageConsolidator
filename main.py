@@ -235,7 +235,6 @@ class ConsoleApp:
         if proxy_file and os.path.exists(proxy_file):
             with open(proxy_file, 'r') as f:
                 proxy_list = [line.strip() for line in f if line.strip()]
-            self.logger.log(Status.INFO, message=f"Loaded {len(proxy_list)} proxies from {proxy_file}")
 
         self.fetcher = AsyncUrlFetcher(
             self.logger,

@@ -180,7 +180,6 @@ class AiohttpFetcher(BaseFetcher):
                 async with session.get(url, ssl=False, proxy=proxy) as response:
                     if response.status != 200:
                         error_msg = f"HTTP {response.status} for {url}"
-                        self.logger.log(Status.FETCH, message=error_msg)
                         return FetchResult.failure(url, error_msg)
                     content = await response.read()
                     content_type = response.headers.get('Content-Type', '').lower()
@@ -191,7 +190,6 @@ class AiohttpFetcher(BaseFetcher):
             return FetchResult.failure(url, error_msg)
         except ClientError as e:
             error_msg = f"Client error for {url}: {str(e)}"
-            self.logger.log(Status.FETCH, exc=e, message=error_msg)
             return FetchResult.failure(url, error_msg)
         except Exception as e:
             error_msg = f"Unexpected error for {url}: {str(e)}"
@@ -233,13 +231,11 @@ class RequestsThreadFetcher(BaseFetcher):
             resp = requests.get(url, headers=headers, timeout=self.timeout, verify=False, proxies=proxies)
             if resp.status_code != 200:
                 error_msg = f"HTTP {resp.status_code} for {url}"
-                self.logger.log(Status.FETCH, message=error_msg)
                 return FetchResult.failure(url, error_msg)
             content_type = resp.headers.get('Content-Type', '').lower()
             return FetchResult.success(url, resp.content, content_type)
         except RequestException as e:
             error_msg = f"Requests error for {url}: {str(e)}"
-            self.logger.log(Status.FETCH, exc=e, message=error_msg)
             return FetchResult.failure(url, error_msg)
         except Exception as e:
             error_msg = f"Unexpected error in sync fetch for {url}: {str(e)}"
@@ -280,13 +276,11 @@ class CurlCffiFetcher(BaseFetcher):
                 )
                 if response.status_code != 200:
                     error_msg = f"HTTP {response.status_code} for {url}"
-                    self.logger.log(Status.FETCH, message=error_msg)
                     return FetchResult.failure(url, error_msg)
                 content_type = response.headers.get('Content-Type', '').lower()
                 return FetchResult.success(url, response.content, content_type)
         except Exception as e:
             error_msg = f"curl_cffi error for {url}: {str(e)}"
-            self.logger.log(Status.FETCH, exc=e, message=error_msg)
             return FetchResult.failure(url, error_msg)
 
 # ----------------------------------------------------------------------
@@ -354,7 +348,6 @@ class RotatingProxyFetcher(BaseFetcher):
         last_error = None
         for attempt in range(self.max_retries):
             proxy_url = next(self._cycle)
-            self.logger.log(Status.FETCH, message=f"Attempt {attempt+1} with proxy {proxy_url}")
             result = await self.base.fetch(url, headers=headers, proxy=proxy_url)
             if result.success:
                 return result
@@ -424,7 +417,6 @@ class AsyncUrlFetcher:
                             p.cancel()
                         # Also cancel any that might be in the done set but not processed
                         # (though this shouldn't happen with FIRST_COMPLETED)
-                        self.logger.log(Status.FETCH, message=f"Success from {self._get_fetcher_name(task)} for {url}")
                         return result
                     else:
                         last_result = result
