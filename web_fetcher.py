@@ -420,8 +420,6 @@ class AsyncUrlFetcher:
                         return result
                     else:
                         last_result = result
-                        self.logger.log(Status.WARNING, 
-                                      message=f"Fetcher {self._get_fetcher_name(task)} failed for {url}: {result.error}")
                 
                 # If we have pending tasks and no success yet, continue waiting
                 # (pending may have been updated by the wait call)

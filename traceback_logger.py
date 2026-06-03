@@ -57,16 +57,13 @@ class TracebackLogger:
         error_name = error_type.name
 
         # Build traceback string
+        tb_str = ""
         if exc is not None:
             tb_str = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-        else:
-            exc_type, exc_value, exc_tb = sys.exc_info()
-            if exc_type is not None:
-                tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            else:
-                tb_str = "(No active exception – call from an except block or pass exc explicitly)\n"
 
-        output_lines = [tb_str.rstrip('\n')]
+        output_lines = []
+        if tb_str:
+            output_lines.append(tb_str.rstrip('\n'))
         output_lines.append(f"[{error_name}] in {method_name}()")
         if message:
             output_lines.append(f"Message: {message}")
